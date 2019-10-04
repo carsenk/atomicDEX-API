@@ -204,6 +204,7 @@ impl MmCtx {
     }   }
 
     /// Sends the P2P message to a processing thread
+    #[cfg(feature = "native")]
     pub fn broadcast_p2p_msg(&self, msg: &str) {
         let i_am_seed = self.conf["i_am_seed"].as_bool().unwrap_or(false);
         if i_am_seed {
@@ -211,6 +212,18 @@ impl MmCtx {
         } else {
             unwrap!(self.client_p2p_channel.0.send(msg.to_owned().into_bytes()));
     }   }
+
+    #[cfg(not(feature = "native"))]
+    pub fn broadcast_p2p_msg (&self, msg: &str) {
+        use crate::helperᶜ;
+        use crate::executor::spawn;
+
+        let msg = Vec::from (msg);
+        spawn (async move {
+            let rc = helperᶜ ("broadcast_p2p_msg", msg) .await;
+            if let Err (err) = rc {log! ("!broadcast_p2p_msg: " (err))}
+        });
+    }
 
     /// Get a reference to the secp256k1 key pair.
     /// Panics if the key pair is not available.

@@ -43,6 +43,7 @@ use hyper::{self, service::Service};
 use serde_json::{self as json, Value as Json};
 use std::future::{Future as Future03};
 use std::net::SocketAddr;
+use std::str::from_utf8;
 #[cfg(feature = "native")]
 use tokio_core::net::TcpListener;
 
@@ -128,6 +129,10 @@ async fn helpers (ctx: MmArc, client: SocketAddr, req: Parts,
     if crc32 != expected_checksum {return ERR! ("Damaged goods")}
 
     let res = match method {
+        "broadcast_p2p_msg" => {
+            let msg = try_s! (from_utf8 (&reqᵇ[..]));
+            log! ("broadcast_p2p_msg: " (msg));
+            ctx.broadcast_p2p_msg (msg); Vec::new()},
         "common_wait_for_log_re" => try_s! (common_wait_for_log_re (reqᵇ) .await),
         "ctx2helpers" => try_s! (ctx2helpers (ctx, reqᵇ) .await),
         "peers_initialize" => try_s! (peers::peers_initialize (reqᵇ) .await),
