@@ -22,10 +22,8 @@
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
 #![cfg_attr(not(feature = "native"), allow(unused_imports))]
 
-use common::{double_panic_crash, MM_VERSION};
+use common::{block_on, double_panic_crash, MM_VERSION};
 use common::mm_ctx::MmCtxBuilder;
-
-use futures::executor::block_on;
 
 use gstuff::{slurp};
 
@@ -116,6 +114,9 @@ fn help() {
         "                     If the field isn't present on the command line then we try loading it from the 'coins' file.\n"
         "  crash          ..  Simulate a crash to check how the crash handling works.\n"
         "  dbdir          ..  MM database path. 'DB' by default.\n"
+        "  gui            ..  The information about GUI app using MM2 instance. Included in swap statuses shared with network.\n"
+        "                 ..  It's recommended to put essential info to this field (application name, OS, version, etc).\n"
+        "                 ..  e.g. AtomicDEX iOS 1.0.1000.\n"
         "  myipaddr       ..  IP address to bind to for P2P networking.\n"
         "  netid          ..  Subnetwork. Affects ports and keys.\n"
         "  passphrase *   ..  Wallet seed.\n"

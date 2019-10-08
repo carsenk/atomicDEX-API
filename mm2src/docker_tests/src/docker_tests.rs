@@ -12,11 +12,11 @@
 
 #[cfg(test)]
 mod docker_tests {
+    use common::block_on;
     use coins::{FoundSwapTxSpend, MarketCoinOps, SwapOps};
     use coins::utxo::{coin_daemon_data_dir, dhash160, utxo_coin_from_conf_and_request, zcash_params_path, UtxoCoin};
     use coins::utxo::rpc_clients::{UtxoRpcClientEnum, UtxoRpcClientOps};
     use futures01::Future;
-    use futures::executor::block_on;
     use gstuff::now_ms;
     use secp256k1::SecretKey;
     use std::io::{BufRead, BufReader};
@@ -78,13 +78,15 @@ mod docker_tests {
 
         let stdout = ps.stdout.unwrap();
         let reader = BufReader::new(stdout);
-        let ids = reader.lines().map(|line| line.unwrap());
-        Command::new("docker")
-            .arg("rm")
-            .arg("-f")
-            .args(ids)
-            .spawn()
-            .expect("Failed to execute docker command");
+        let ids: Vec<_> = reader.lines().map(|line| line.unwrap()).collect();
+        if !ids.is_empty() {
+            Command::new("docker")
+                .arg("rm")
+                .arg("-f")
+                .args(ids)
+                .spawn()
+                .expect("Failed to execute docker command");
+        }
 
         let docker = Cli::default();
         let utxo_node = utxo_docker_node(&docker);

@@ -81,7 +81,6 @@ pub mod lift_body {
 
 use atomic::Atomic;
 use bigdecimal::BigDecimal;
-use crossbeam::{channel};
 use futures01::{future, task::Task, Future};
 #[cfg(not(feature = "native"))]
 use futures::task::{Context, Poll as Poll03};
@@ -101,11 +100,12 @@ use serde_bencode::de::from_bytes as bdecode;
 use serde_bytes::ByteBuf;
 use serde_json::{self as json, Value as Json};
 use std::collections::HashMap;
-use std::env::{self, args, var, VarError};
+use std::env::{self, args};
 use std::fmt::{self, Write as FmtWrite};
 use std::fs;
 use std::fs::DirEntry;
 use std::ffi::{CStr, OsStr};
+use std::future::Future as Future03;
 use std::intrinsics::copy;
 use std::io::{Write};
 use std::mem::{forget, size_of, uninitialized, zeroed};
@@ -829,13 +829,11 @@ pub mod executor {
     }
 
     #[test] fn test_timer() {
-        use futures::executor::block_on;
-
         let started = now_float();
         let ti = Timer::sleep (0.2);
         let delta = now_float() - started;
         assert! (delta < 0.04, "{}", delta);
-        block_on (ti);
+        super::block_on (ti);
         let delta = now_float() - started;
         println! ("time delta is {}", delta);
         assert! (delta > 0.2);
@@ -1078,11 +1076,6 @@ pub struct QueuedCommand {
     // retstrp: *mut *mut c_char,
 }
 
-lazy_static! {
-    // TODO: Move to `MmCtx`.
-    pub static ref COMMAND_QUEUE: (channel::Sender<QueuedCommand>, channel::Receiver<QueuedCommand>) = channel::unbounded();
-}
-
 /// Register an RPC command that came internally or from the peer-to-peer bus.
 #[no_mangle]
 #[cfg(feature = "native")]
@@ -1094,23 +1087,69 @@ pub extern "C" fn lp_queue_command_for_c (retstrp: *mut *mut c_char, buf: *mut c
 
     if buf == null_mut() {panic! ("!buf")}
     let msg = String::from (unwrap! (unsafe {CStr::from_ptr (buf)} .to_str()));
-    let cmd = QueuedCommand {
+    let _cmd = QueuedCommand {
         msg,
         queue_id,
         response_sock,
         stats_json_only
     };
-    unwrap! ((*COMMAND_QUEUE).0.send (cmd))
+    panic! ("We need a context ID");
+    //unwrap! ((*COMMAND_QUEUE).0.send (cmd))
 }
 
-pub fn lp_queue_command (msg: String) -> () {
+pub fn lp_queue_command (ctx: &mm_ctx::MmArc, msg: String) -> Result<(), String> {
+    // If we're helping a WASM then leave a copy of the broadcast for them.
+    if let Some (ref mut cq) = *try_s! (ctx.command_queueʰ.lock()) {
+        // Monotonic increment.
+        let now = if let Some (last) = cq.last() {(last.0 + 1) .max (now_ms())} else {now_ms()};
+        cq.push ((now, msg.clone()))
+    }
+
     let cmd = QueuedCommand {
         msg,
         queue_id: 0,
         response_sock: -1,
         stats_json_only: 0,
     };
-    unwrap! ((*COMMAND_QUEUE).0.send (cmd))
+    try_s! (ctx.command_queue.unbounded_send (cmd));
+    Ok(())
+}
+
+pub fn var (name: &str) -> Result<String, String> {
+    /// Obtains the environment variable `name` from the host, copying it into `rbuf`.  
+    /// Returns the length of the value copied to `rbuf` or -1 if there was an error.
+    #[cfg(not(feature = "native"))]
+    extern "C" {pub fn host_env (name: *const c_char, nameˡ: i32, rbuf: *mut c_char, rcap: i32) -> i32;}
+
+    #[cfg(feature = "native")] {
+        match std::env::var (name) {
+            Ok (v) => Ok (v),
+            Err (_err) => ERR! ("No {}", name)
+        }
+    }
+
+    #[cfg(not(feature = "native"))] {  // Get the environment variable from the host.
+        use std::mem::zeroed;
+        use std::str::from_utf8;
+
+        let mut buf: [u8; 4096] = unsafe {zeroed()};
+        let rc = unsafe {host_env (
+            name.as_ptr() as *const c_char, name.len() as i32,
+            buf.as_mut_ptr() as *mut c_char, buf.len() as i32)};
+        if rc <= 0 {return ERR! ("No {}", name)}
+        let s = try_s! (from_utf8 (&buf[0 .. rc as usize]));
+        Ok (String::from (s))
+    }
+}
+
+pub fn block_on<F> (f: F) -> F::Output where F: Future03 {
+    if var ("TRACE_BLOCK_ON") .map (|v| v == "true") == Ok (true) {
+        let mut trace = String::with_capacity (4096);
+        stack_trace (&mut stack_trace_frame, &mut |l| trace.push_str (l));
+        log! ("block_on at\n" (trace));
+    }
+
+    futures::executor::block_on (f)
 }
 
 #[cfg(feature = "native")]
@@ -1147,6 +1186,24 @@ pub fn temp_dir() -> PathBuf {
 }
 
 #[cfg(feature = "native")]
+pub fn remove_file (path: &dyn AsRef<Path>) -> Result<(), String> {
+    try_s! (fs::remove_file (path));
+    Ok(())
+}
+
+#[cfg(not(feature = "native"))]
+pub fn remove_file (path: &dyn AsRef<Path>) -> Result<(), String> {
+    use std::os::raw::c_char;
+
+    extern "C" {pub fn host_rm (ptr: *const c_char, len: i32) -> i32;}
+
+    let path = try_s! (path.as_ref().to_str().ok_or ("Non-unicode path"));
+    let rc = unsafe {host_rm (path.as_ptr() as *const c_char, path.len() as i32)};
+    if rc != 0 {return ERR! ("!host_rm: {}", rc)}
+    Ok(())
+}
+
+#[cfg(feature = "native")]
 pub fn write (path: &dyn AsRef<Path>, contents: &dyn AsRef<[u8]>) -> Result<(), String> {
     try_s! (fs::write (path, contents));
     Ok(())
@@ -1156,9 +1213,9 @@ pub fn write (path: &dyn AsRef<Path>, contents: &dyn AsRef<[u8]>) -> Result<(), 
 pub fn write (path: &dyn AsRef<Path>, contents: &dyn AsRef<[u8]>) -> Result<(), String> {
     use std::os::raw::c_char;
 
-    extern "C" {pub fn host_write(path_p: *const c_char, path_l: i32, ptr: *const c_char, len: i32) -> i32;}
+    extern "C" {pub fn host_write (path_p: *const c_char, path_l: i32, ptr: *const c_char, len: i32) -> i32;}
 
-    let path = try_s! (path.as_ref().to_str().ok_or("Non-unicode path"));
+    let path = try_s! (path.as_ref().to_str().ok_or ("Non-unicode path"));
     let content = contents.as_ref();
     let rc = unsafe {host_write (
         path.as_ptr() as *const c_char, path.len() as i32,
@@ -1174,8 +1231,7 @@ pub fn write (path: &dyn AsRef<Path>, contents: &dyn AsRef<[u8]>) -> Result<(), 
 fn open_log_file() -> Option<fs::File> {
     let mm_log = match var ("MM_LOG") {
         Ok (v) => v,
-        Err (VarError::NotPresent) => return None,
-        Err (err) => {println! ("open_log_file] Error getting MM_LOG: {}", err); return None}
+        Err (_) => return None
     };
 
     // For security reasons we want the log path to always end with ".log".
@@ -1348,6 +1404,12 @@ pub async fn helperᶜ (helper: &'static str, args: Vec<u8>) -> Result<Vec<u8>, 
     if rv.status != 200 {return ERR! ("!{}: {}", helper, rv)}
     // TODO: Check `rv.checksum` if present.
     Ok (rv.body.into_vec())
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct BroadcastP2pMessageArgs {
+    pub ctx: u32,
+    pub msg: String
 }
 
 /// Invokes callback `cb_id` in the WASM host, passing a `(ptr,len)` string to it.

@@ -7,3 +7,4 @@ curl --url "http://127.0.0.1:7783" --data "{\"userpass\":\"$userpass\",\"method\
 curl --url "http://127.0.0.1:7783" --data "{\"userpass\":\"$userpass\",\"method\":\"electrum\",\"coin\":\"BEER\",\"urls\":[\"electrum1.cipig.net:10022\",\"electrum2.cipig.net:10022\",\"electrum3.cipig.net:10022\"],\"mm2\":1}"
 curl --url "http://127.0.0.1:7783" --data "{\"userpass\":\"$userpass\",\"method\":\"electrum\",\"coin\":\"PIZZA\",\"urls\":[\"electrum1.cipig.net:10024\",\"electrum2.cipig.net:10024\",\"electrum3.cipig.net:10024\"],\"mm2\":1}"
 curl --url "http://127.0.0.1:7783" --data "{\"userpass\":\"$userpass\",\"method\":\"electrum\",\"coin\":\"ETOMIC\",\"urls\":[\"electrum1.cipig.net:10025\",\"electrum2.cipig.net:10025\",\"electrum3.cipig.net:10025\"],\"mm2\":1}"
+curl --url "http://127.0.0.1:7783" --data "{\"userpass\":\"$userpass\",\"method\":\"electrum\",\"coin\":\"DNR\",\"urls\":[\"denarius.tech:50001\",\"denarius.tech:50002\"],\"mm2\":1}"
